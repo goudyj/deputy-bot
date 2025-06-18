@@ -2,6 +2,8 @@ from pydantic import BaseModel
 from typing import List
 import os
 import re
+from .llm_config import LLMConfig
+from .issue import IssueCreationConfig
 
 
 class MattermostConfig(BaseModel):
@@ -33,6 +35,8 @@ class MattermostConfig(BaseModel):
 
 class AppConfig(BaseModel):
     mattermost: MattermostConfig
+    llm: LLMConfig
+    issue_creation: IssueCreationConfig
     debug: bool = False
     
     github_token: str = ""
@@ -48,6 +52,8 @@ class AppConfig(BaseModel):
     def from_env(cls):
         return cls(
             mattermost=MattermostConfig.from_env(),
+            llm=LLMConfig.from_env(),
+            issue_creation=IssueCreationConfig.from_env(),
             debug=os.getenv("DEBUG", "false").lower() == "true",
             github_token=os.getenv("GITHUB_TOKEN", ""),
             github_org=os.getenv("GITHUB_ORG", ""),

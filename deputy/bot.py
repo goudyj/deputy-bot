@@ -5,6 +5,9 @@ from typing import Any, Dict, Optional
 import aiohttp
 import websockets
 from deputy.models.config import AppConfig
+from deputy.services.thread_analyzer import ThreadAnalyzer
+from deputy.services.github_integration import GitHubIntegration
+from deputy.services.mattermost_thread import MattermostThreadService
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +24,18 @@ class DeputyBot:
             "Content-Type": "application/json"
         }
         
+        # Initialize services
+        self.thread_analyzer = None
+        self.github_integration = None
+        self.thread_service = None
+        
     async def start(self):
         try:
             self.session = aiohttp.ClientSession()
             logger.info(f"Starting bot {self.config.mattermost.bot_name}...")
             
             await self._initialize()
+            self._initialize_services()
             await self._start_websocket()
             
         except Exception as e:
@@ -73,6 +82,39 @@ class DeputyBot:
                             raise Exception("No team available for the bot")
                     else:
                         raise Exception("Unable to retrieve teams")
+    
+    def _initialize_services(self):
+        """Initialize LLM and GitHub services"""
+        try:
+            # Initialize thread analyzer if LLM is configured
+            if self.config.llm.get_api_key():
+                self.thread_analyzer = ThreadAnalyzer(self.config.llm)
+                logger.info("Thread analyzer initialized")
+            else:
+                logger.warning("No LLM API key found - thread analysis disabled")
+            
+            # Initialize GitHub integration if configured
+            if self.config.github_token and self.config.github_org and self.config.github_repo:
+                self.github_integration = GitHubIntegration(
+                    self.config.github_token,
+                    self.config.github_org,
+                    self.config.github_repo,
+                    self.config.issue_creation
+                )
+                logger.info("GitHub integration initialized")
+            else:
+                logger.warning("GitHub not configured - issue creation disabled")
+            
+            # Initialize thread service
+            self.thread_service = MattermostThreadService(
+                self.session,
+                self.config.mattermost.url,
+                self.headers
+            )
+            
+        except Exception as e:
+            logger.error(f"Error initializing services: {e}")
+            # Continue without services rather than failing
 
     async def _start_websocket(self):
         ws_url = self.config.mattermost.url.replace("http://", "ws://").replace("https://", "wss://")
@@ -158,7 +200,8 @@ class DeputyBot:
             command = message_text.replace(f"@{self.config.mattermost.bot_name}", "").strip()
             logger.info(f"Command received in #{channel_name}: {command}")
             
-            response = await self._process_command(command, channel_name)
+            # Pass the original post data for create-issue command
+            response = await self._process_command(command, channel_name, post)
             
             if response:
                 await self._send_message(channel_id, response)
@@ -166,7 +209,7 @@ class DeputyBot:
         except Exception as e:
             logger.error(f"Error processing message: {e}")
 
-    async def _process_command(self, command: str, channel_name: str) -> Optional[str]:
+    async def _process_command(self, command: str, channel_name: str, post_data: Optional[Dict[str, Any]] = None) -> Optional[str]:
         command = command.lower().strip()
         
         if command == "help":
@@ -175,6 +218,8 @@ class DeputyBot:
             return "🤖 Deputy Bot is operational!"
         elif command.startswith("bug"):
             return "🐛 Bug management feature under development..."
+        elif command.startswith("create-issue"):
+            return await self._handle_create_issue_command(command, channel_name, post_data)
         elif command.startswith("issue"):
             return "📝 Issue creation feature under development..."
         else:
@@ -194,11 +239,82 @@ class DeputyBot:
             if resp.status != 201:
                 logger.error(f"Error sending message: {resp.status}")
 
+    async def _handle_create_issue_command(
+        self, 
+        command: str, 
+        channel_name: str, 
+        post_data: Optional[Dict[str, Any]]
+    ) -> str:
+        """Handle create-issue command"""
+        
+        # Check if services are available
+        if not self.thread_analyzer:
+            return "❌ Thread analysis not available - LLM not configured"
+        
+        if not self.github_integration:
+            return "❌ GitHub integration not available - check configuration"
+        
+        if not post_data:
+            return "❌ No post data available for analysis"
+        
+        try:
+            # Extract thread root ID (post that started the thread)
+            root_id = post_data.get("root_id") or post_data.get("id")
+            channel_id = post_data.get("channel_id")
+            
+            logger.info(f"Post data: root_id={post_data.get('root_id')}, id={post_data.get('id')}, channel_id={channel_id}")
+            
+            if not root_id:
+                return "❌ Could not identify thread root"
+            
+            # Get thread messages
+            logger.info(f"Analyzing thread {root_id} for issue creation")
+            thread_messages = await self.thread_service.get_thread_messages(root_id)
+            
+            logger.info(f"Found {len(thread_messages)} messages in thread")
+            if not thread_messages:
+                return "❌ No messages found in thread"
+            
+            # Log first few messages for debugging
+            for i, msg in enumerate(thread_messages[:3]):
+                logger.info(f"Message {i}: {msg.user} - {msg.content[:100]}...")
+            
+            # Analyze thread with LLM
+            logger.info("Starting LLM analysis...")
+            analysis = await self.thread_analyzer.analyze_thread(thread_messages)
+            
+            logger.info(f"Analysis result: title='{analysis.suggested_title}', confidence={analysis.confidence_score}")
+            
+            if analysis.confidence_score < 0.3:
+                return f"⚠️ Low confidence analysis ({analysis.confidence_score:.2f}). Thread may not contain enough information for a good issue."
+            
+            # Create permalink to thread
+            permalink = await self.thread_service.get_channel_permalink(channel_id, root_id)
+            logger.info(f"Created permalink: {permalink}")
+            
+            # Create GitHub issue
+            logger.info("Creating GitHub issue...")
+            issue_url = await self.github_integration.create_issue_from_analysis(analysis, permalink)
+            
+            return f"""✅ **GitHub issue created successfully!**
+
+**Issue:** [{analysis.suggested_title}]({issue_url})
+**Type:** {analysis.issue_type.value}
+**Priority:** {analysis.priority.value}
+**Confidence:** {analysis.confidence_score:.2f}
+
+The issue has been created with automatic analysis of the thread content."""
+            
+        except Exception as e:
+            logger.error(f"Error creating issue: {e}")
+            return f"❌ Failed to create issue: {str(e)}"
+
     def _get_help_message(self) -> str:
         return """🤖 **Deputy Bot - Available Commands:**
 
 • `help` - Display this help
 • `status` - Check bot status
+• `create-issue` - Create a GitHub issue from the current thread
 • `bug <description>` - Analyze and prioritize a bug (coming soon)
 • `issue <description>` - Create a GitHub issue (coming soon)
 
