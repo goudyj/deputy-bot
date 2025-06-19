@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 class LLMConfig(BaseModel):
     provider: str = "openai"  # openai or anthropic
-    model: str = "gpt-4-turbo-preview"
+    model: str = "gpt-4o-mini"
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     temperature: float = 0.1
