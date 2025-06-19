@@ -1,6 +1,6 @@
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
 from enum import Enum
+
+from pydantic import BaseModel
 
 
 class IssuePriority(str, Enum):
@@ -23,44 +23,46 @@ class ThreadMessage(BaseModel):
     user: str
     content: str
     timestamp: str
-    attachments: List[str] = []  # URLs to images/files
-    
-    
+    attachments: list[str] = []  # URLs to images/files
+
+
 class ThreadAnalysis(BaseModel):
     summary: str
     issue_type: IssueType
     priority: IssuePriority
     suggested_title: str
     detailed_description: str
-    steps_to_reproduce: List[str] = []
-    expected_behavior: Optional[str] = None
-    actual_behavior: Optional[str] = None
-    additional_context: Optional[str] = None
-    suggested_labels: List[str] = []
+    steps_to_reproduce: list[str] = []
+    expected_behavior: str | None = None
+    actual_behavior: str | None = None
+    additional_context: str | None = None
+    suggested_labels: list[str] = []
     confidence_score: float  # 0-1 confidence in analysis
 
 
 class GitHubIssue(BaseModel):
     title: str
     body: str
-    labels: List[str] = []
-    assignees: List[str] = []
-    milestone: Optional[str] = None
-    
-    
+    labels: list[str] = []
+    assignees: list[str] = []
+    milestone: str | None = None
+
+
 class IssueCreationConfig(BaseModel):
-    auto_labels: List[str] = []
-    default_assignee: Optional[str] = None
-    project_id: Optional[str] = None
-    template_mapping: Dict[IssueType, str] = {}
-    
+    auto_labels: list[str] = []
+    default_assignee: str | None = None
+    project_id: str | None = None
+    template_mapping: dict[IssueType, str] = {}
+
     @classmethod
     def from_env(cls):
         import os
-        
+
         auto_labels_str = os.getenv("ISSUE_AUTO_LABELS", "")
-        auto_labels = [label.strip() for label in auto_labels_str.split(",") if label.strip()]
-        
+        auto_labels = [
+            label.strip() for label in auto_labels_str.split(",") if label.strip()
+        ]
+
         return cls(
             auto_labels=auto_labels,
             default_assignee=os.getenv("ISSUE_ASSIGNEE"),
@@ -68,6 +70,6 @@ class IssueCreationConfig(BaseModel):
             template_mapping={
                 IssueType.BUG: "bug_template",
                 IssueType.FEATURE: "feature_template",
-                IssueType.ENHANCEMENT: "enhancement_template"
-            }
+                IssueType.ENHANCEMENT: "enhancement_template",
+            },
         )
