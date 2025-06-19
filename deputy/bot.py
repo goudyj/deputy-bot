@@ -204,7 +204,8 @@ class DeputyBot:
             response = await self._process_command(command, channel_name, post)
             
             if response:
-                await self._send_message(channel_id, response)
+                # Send response in thread (reply to the original post)
+                await self._send_threaded_message(channel_id, response, post)
                 
         except Exception as e:
             logger.error(f"Error processing message: {e}")
@@ -238,6 +239,27 @@ class DeputyBot:
         ) as resp:
             if resp.status != 201:
                 logger.error(f"Error sending message: {resp.status}")
+
+    async def _send_threaded_message(self, channel_id: str, message: str, original_post: Dict[str, Any]):
+        """Send a message as a reply in the thread"""
+        # Determine the root post ID for threading
+        root_id = original_post.get("root_id") or original_post.get("id")
+        
+        post_data = {
+            "channel_id": channel_id,
+            "message": message,
+            "root_id": root_id  # This makes it a threaded reply
+        }
+        
+        async with self.session.post(
+            f"{self.config.mattermost.url}/api/v4/posts",
+            headers=self.headers,
+            json=post_data
+        ) as resp:
+            if resp.status != 201:
+                logger.error(f"Error sending threaded message: {resp.status}")
+            else:
+                logger.info(f"Sent threaded reply in channel {channel_id}")
 
     async def _handle_create_issue_command(
         self, 
