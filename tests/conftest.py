@@ -11,6 +11,7 @@ from deputy.models.config import (
     IssueCreationConfig,
     LLMConfig,
     MattermostConfig,
+    SentryConfig,
 )
 from deputy.models.issue import (
     AttachmentInfo,
@@ -41,6 +42,13 @@ def mock_config():
         ),
         issue_creation=IssueCreationConfig(
             auto_labels=["auto-generated"], default_assignee="test_user"
+        ),
+        sentry=SentryConfig(
+            dsn="https://key@sentry.io/project",
+            org="test_org",
+            project="test_project",
+            auth_token="test_auth_token",
+            default_period="24h",
         ),
         github_token="test_github_token",
         github_org="test_org",
@@ -86,16 +94,16 @@ def mock_thread_messages_with_images():
                     url="http://mattermost.example.com/api/v4/files/error_screenshot",
                     filename="error_screenshot.png",
                     mime_type="image/png",
-                    size=1024*512,  # 512KB
-                    is_image=True
+                    size=1024 * 512,  # 512KB
+                    is_image=True,
                 ),
                 AttachmentInfo(
                     url="http://mattermost.example.com/api/v4/files/debug_log",
                     filename="debug.log",
                     mime_type="text/plain",
-                    size=1024*50,  # 50KB
-                    is_image=False
-                )
+                    size=1024 * 50,  # 50KB
+                    is_image=False,
+                ),
             ],
         ),
         ThreadMessage(

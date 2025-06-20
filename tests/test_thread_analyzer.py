@@ -62,12 +62,16 @@ class TestThreadAnalyzer:
                 len(formatted.split("\n\n")) >= 3
             )  # Should have empty lines between messages
 
-    def test_format_thread_with_images(self, mock_config, mock_thread_messages_with_images):
+    def test_format_thread_with_images(
+        self, mock_config, mock_thread_messages_with_images
+    ):
         """Test thread formatting with images and attachments"""
 
         with patch("deputy.services.thread_analyzer.ChatOpenAI"):
             analyzer = ThreadAnalyzer(mock_config.llm)
-            formatted = analyzer._format_thread_for_analysis(mock_thread_messages_with_images)
+            formatted = analyzer._format_thread_for_analysis(
+                mock_thread_messages_with_images
+            )
 
             assert "**alice**" in formatted
             assert "I'm getting this error screen:" in formatted

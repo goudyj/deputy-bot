@@ -7,6 +7,28 @@ from .issue import IssueCreationConfig
 from .llm_config import LLMConfig
 
 
+class SentryConfig(BaseModel):
+    dsn: str = ""
+    org: str = ""
+    project: str = ""
+    auth_token: str = ""
+    default_period: str = "24h"
+
+    def is_configured(self) -> bool:
+        """Check if Sentry is properly configured"""
+        return bool(self.auth_token and self.org and self.project)
+
+    @classmethod
+    def from_env(cls):
+        return cls(
+            dsn=os.getenv("SENTRY_DSN", ""),
+            org=os.getenv("SENTRY_ORG", ""),
+            project=os.getenv("SENTRY_PROJECT", ""),
+            auth_token=os.getenv("SENTRY_AUTH_TOKEN", ""),
+            default_period=os.getenv("SENTRY_DEFAULT_PERIOD", "24h"),
+        )
+
+
 class MattermostConfig(BaseModel):
     url: str
     token: str
@@ -38,16 +60,12 @@ class AppConfig(BaseModel):
     mattermost: MattermostConfig
     llm: LLMConfig
     issue_creation: IssueCreationConfig
+    sentry: SentryConfig
     debug: bool = False
 
     github_token: str = ""
     github_org: str = ""
     github_repo: str = ""
-
-    sentry_dsn: str = ""
-    sentry_org: str = ""
-    sentry_project: str = ""
-    sentry_auth_token: str = ""
 
     @classmethod
     def from_env(cls):
@@ -55,12 +73,9 @@ class AppConfig(BaseModel):
             mattermost=MattermostConfig.from_env(),
             llm=LLMConfig.from_env(),
             issue_creation=IssueCreationConfig.from_env(),
+            sentry=SentryConfig.from_env(),
             debug=os.getenv("DEBUG", "false").lower() == "true",
             github_token=os.getenv("GITHUB_TOKEN", ""),
             github_org=os.getenv("GITHUB_ORG", ""),
             github_repo=os.getenv("GITHUB_REPO", ""),
-            sentry_dsn=os.getenv("SENTRY_DSN", ""),
-            sentry_org=os.getenv("SENTRY_ORG", ""),
-            sentry_project=os.getenv("SENTRY_PROJECT", ""),
-            sentry_auth_token=os.getenv("SENTRY_AUTH_TOKEN", ""),
         )

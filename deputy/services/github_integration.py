@@ -139,7 +139,9 @@ class GitHubIntegration:
 
             if images:
                 body_parts.append("## Screenshots & Images")
-                body_parts.append("*The following images were attached to the discussion:*")
+                body_parts.append(
+                    "*The following images were attached to the discussion:*"
+                )
                 body_parts.append("")
                 for i, img in enumerate(images, 1):
                     file_info = f"{i}. 📸 **{img.filename}**"
@@ -149,9 +151,13 @@ class GitHubIntegration:
                         size_mb = img.size / (1024 * 1024)
                         file_info += f" - {size_mb:.1f} MB"
                     body_parts.append(file_info)
-                    body_parts.append(f"   > [View in Mattermost thread]({img.url}) *(requires authentication)*")
+                    body_parts.append(
+                        f"   > [View in Mattermost thread]({img.url}) *(requires authentication)*"
+                    )
                 body_parts.append("")
-                body_parts.append("💡 **To view images**: Please check the Mattermost thread link below or ask the reporter to attach them directly to this GitHub issue.")
+                body_parts.append(
+                    "💡 **To view images**: Please check the Mattermost thread link below or ask the reporter to attach them directly to this GitHub issue."
+                )
                 body_parts.append("")
 
             if files:

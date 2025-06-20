@@ -100,7 +100,9 @@ class TestGitHubIntegration:
             # Check assignee
             assert "test_user" in result.assignees
 
-    def test_analysis_to_github_issue_with_images(self, mock_config, mock_thread_analysis, mock_thread_messages_with_images):
+    def test_analysis_to_github_issue_with_images(
+        self, mock_config, mock_thread_analysis, mock_thread_messages_with_images
+    ):
         """Test GitHub issue creation with images and attachments"""
 
         with patch("deputy.services.github_integration.Github"):
@@ -109,7 +111,9 @@ class TestGitHubIntegration:
             )
 
             result = integration._analysis_to_github_issue(
-                mock_thread_analysis, "http://mattermost.link", mock_thread_messages_with_images
+                mock_thread_analysis,
+                "http://mattermost.link",
+                mock_thread_messages_with_images,
             )
 
             assert result.title == "403 Forbidden Error on API Connection"

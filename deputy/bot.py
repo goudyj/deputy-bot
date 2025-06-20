@@ -5,8 +5,10 @@ from typing import Any
 import aiohttp
 
 from deputy.models.config import AppConfig
+from deputy.models.sentry import SentrySearchFilter
 from deputy.services.github_integration import GitHubIntegration
 from deputy.services.mattermost_thread import MattermostThreadService
+from deputy.services.sentry_integration import SentryIntegration
 from deputy.services.thread_analyzer import ThreadAnalyzer
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,7 @@ class DeputyBot:
         self.thread_analyzer = None
         self.github_integration = None
         self.thread_service = None
+        self.sentry_integration = None
 
     async def start(self):
         try:
@@ -116,6 +119,13 @@ class DeputyBot:
             self.thread_service = MattermostThreadService(
                 self.session, self.config.mattermost.url, self.headers
             )
+
+            # Initialize Sentry integration if configured
+            if self.config.sentry.is_configured():
+                self.sentry_integration = SentryIntegration(self.config.sentry)
+                logger.info("Sentry integration initialized")
+            else:
+                logger.warning("Sentry not configured - error monitoring disabled")
 
         except Exception as e:
             logger.error(f"Error initializing services: {e}")
@@ -235,6 +245,8 @@ class DeputyBot:
             return await self._handle_create_issue_command(
                 command, channel_name, post_data
             )
+        elif command.startswith("sentry"):
+            return await self._handle_sentry_command(command)
         elif command.startswith("issue"):
             return "📝 Issue creation feature under development..."
         else:
@@ -349,12 +361,114 @@ The issue has been created with automatic analysis of the thread content."""
             logger.error(f"Error creating issue: {e}")
             return f"❌ Failed to create issue: {str(e)}"
 
+    async def _handle_sentry_command(self, command: str) -> str:
+        """Handle Sentry-related commands"""
+        if not self.sentry_integration:
+            return "❌ Sentry integration not available - check configuration"
+
+        try:
+            # Parse command parts
+            parts = command.strip().split()
+            if len(parts) < 2:
+                return self._get_sentry_help()
+
+            subcommand = parts[1].lower()
+
+            if subcommand == "top":
+                # Handle: sentry top [period] [limit]
+                period = (
+                    parts[2] if len(parts) > 2 else self.config.sentry.default_period
+                )
+                limit = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 10
+
+                issues = await self.sentry_integration.get_top_issues(period, limit)
+                if not issues:
+                    return f"📊 No issues found for period `{period}`"
+
+                response = f"🔴 **Top {len(issues)} Sentry Issues ({period})**\n\n"
+                for issue in issues:
+                    response += (
+                        self.sentry_integration.format_issue_summary(issue) + "\n\n"
+                    )
+
+                return response.strip()
+
+            elif subcommand == "search":
+                # Handle: sentry search [query] [period]
+                if len(parts) < 3:
+                    return "❌ Usage: `sentry search <query> [period]`"
+
+                query = " ".join(parts[2:-1]) if len(parts) > 3 else parts[2]
+                period = (
+                    parts[-1]
+                    if len(parts) > 3 and parts[-1] in ["24h", "7d"]
+                    else "24h"
+                )
+
+                filters = SentrySearchFilter(query=query, period=period, limit=5)
+
+                issues = await self.sentry_integration.search_issues(filters)
+                if not issues:
+                    return (
+                        f"🔍 No issues found for query `{query}` in period `{period}`"
+                    )
+
+                response = f"🔍 **Sentry Search Results** (`{query}`, {period})\n\n"
+                for issue in issues:
+                    response += (
+                        self.sentry_integration.format_issue_summary(issue) + "\n\n"
+                    )
+
+                return response.strip()
+
+            elif subcommand == "stats":
+                # Handle: sentry stats [period]
+                period = (
+                    parts[2] if len(parts) > 2 else self.config.sentry.default_period
+                )
+
+                stats = await self.sentry_integration.get_project_stats(period)
+
+                return f"""📊 **Sentry Project Stats ({period})**
+
+💥 **Total Events:** {stats.total_events:,}
+🐛 **Total Issues:** {stats.total_issues}
+✅ **Resolved Issues:** {stats.resolved_issues}
+🆕 **New Issues:** {stats.new_issues}
+
+**Top Issues:**
+{chr(10).join(self.sentry_integration.format_issue_summary(issue) for issue in stats.top_issues[:3])}"""
+
+            else:
+                return self._get_sentry_help()
+
+        except Exception as e:
+            logger.error(f"Error handling Sentry command: {e}")
+            return f"❌ Sentry command failed: {str(e)}"
+
+    def _get_sentry_help(self) -> str:
+        """Get Sentry command help"""
+        return """🔴 **Sentry Commands:**
+
+• `sentry top [period] [limit]` - Show top issues (default: 24h, 10 issues)
+• `sentry search <query> [period]` - Search issues (default: 24h)
+• `sentry stats [period]` - Show project statistics (default: 24h)
+
+**Supported periods:** `24h`, `7d` only
+**Examples:**
+- `sentry top 24h 5` - Top 5 issues from last 24 hours
+- `sentry top 7d 10` - Top 10 issues from last 7 days
+- `sentry search "timeout" 24h` - Search for timeout errors in last 24h"""
+
     def _get_help_message(self) -> str:
         return """🤖 **Deputy Bot - Available Commands:**
 
 • `help` - Display this help
 • `status` - Check bot status
 • `create-issue` - Create a GitHub issue from the current thread
+• `sentry top [24h|7d] [limit]` - Show top Sentry issues (periods: 24h, 7d only)
+• `sentry search <query> [24h|7d]` - Search Sentry issues (periods: 24h, 7d only)
+• `sentry stats [24h|7d]` - Show Sentry project statistics (periods: 24h, 7d only)
 • `bug <description>` - Analyze and prioritize a bug (coming soon)
 • `issue <description>` - Create a GitHub issue (coming soon)
 
