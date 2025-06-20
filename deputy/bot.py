@@ -293,7 +293,7 @@ class DeputyBot:
         channel_name: str,
         post_data: dict[str, Any] | None,
     ) -> str:
-        """Handle create-issue command"""
+        """Handle create-issue command - supports both thread analysis and direct description"""
 
         # Check if services are available
         if not self.thread_analyzer:
@@ -306,78 +306,163 @@ class DeputyBot:
             return "❌ No post data available for analysis"
 
         try:
-            # Extract thread root ID (post that started the thread)
-            root_id = post_data.get("root_id") or post_data.get("id")
-            channel_id = post_data.get("channel_id")
+            # Parse command to check if description is provided
+            command_parts = command.split(" ", 1)
+            has_description = len(command_parts) > 1 and command_parts[1].strip()
 
-            logger.info(
-                f"Post data: root_id={post_data.get('root_id')}, id={post_data.get('id')}, channel_id={channel_id}"
+            if has_description:
+                # Mode 1: Direct issue creation from description
+                description = command_parts[1].strip()
+                logger.info(
+                    f"Creating issue from direct description: {description[:100]}..."
+                )
+
+                return await self._create_issue_from_description(description, post_data)
+            else:
+                # Mode 2: Thread analysis (existing behavior)
+                return await self._create_issue_from_thread(post_data)
+
+        except Exception as e:
+            logger.error(f"Error creating issue: {e}")
+            return f"❌ Failed to create issue: {str(e)}"
+
+    async def _create_issue_from_description(
+        self, description: str, post_data: dict[str, Any]
+    ) -> str:
+        """Create issue directly from a description provided by user"""
+        from deputy.models.issue import ThreadMessage
+
+        # Create a synthetic ThreadMessage from the description
+        username = (
+            "user"  # We could get the actual username from Mattermost API if needed
+        )
+
+        synthetic_messages = [
+            ThreadMessage(
+                user=username,
+                content=description,
+                timestamp="",  # Current timestamp could be added
+                attachments=[],
             )
+        ]
 
-            if not root_id:
-                return "❌ Could not identify thread root"
+        # Analyze the description with LLM
+        logger.info("Analyzing description with LLM...")
+        analysis = await self.thread_analyzer.analyze_thread(synthetic_messages)
 
-            # Get thread messages
-            logger.info(f"Analyzing thread {root_id} for issue creation")
-            thread_messages = await self.thread_service.get_thread_messages(root_id)
+        logger.info(
+            f"Analysis result: title='{analysis.suggested_title}', confidence={analysis.confidence_score}"
+        )
 
-            logger.info(f"Found {len(thread_messages)} messages in thread")
-            if not thread_messages:
-                return "❌ No messages found in thread"
+        if analysis.confidence_score < 0.2:
+            return f"⚠️ Low confidence analysis ({analysis.confidence_score:.2f}). Description may not contain enough information for a good issue. Try providing more details."
 
-            # Log first few messages for debugging
-            for i, msg in enumerate(thread_messages[:3]):
-                logger.info(f"Message {i}: {msg.user} - {msg.content[:100]}...")
+        # Create GitHub issue directly (no permalink for direct descriptions)
+        logger.info("Creating GitHub issue from description...")
 
-            # Analyze thread with LLM
-            logger.info("Starting LLM analysis...")
-            analysis = await self.thread_analyzer.analyze_thread(thread_messages)
+        result = await self.github_integration.create_issue_from_analysis(
+            analysis,
+            mattermost_link=None,  # No thread link for direct descriptions
+            thread_messages=synthetic_messages,
+            sentry_integration=self.sentry_integration,
+            force_create=False,
+        )
 
-            logger.info(
-                f"Analysis result: title='{analysis.suggested_title}', confidence={analysis.confidence_score}"
-            )
+        # Handle similar issues found
+        if isinstance(result, dict) and result.get("type") == "similar_issues_found":
+            # Store issue data for potential creation
+            post_id = post_data.get("id")
+            self.pending_issues[post_id] = {
+                "analysis": result["analysis"],
+                "mattermost_link": result["mattermost_link"],
+                "thread_messages": result["thread_messages"],
+                "channel_id": post_data.get("channel_id"),
+            }
 
-            if analysis.confidence_score < 0.3:
-                return f"⚠️ Low confidence analysis ({analysis.confidence_score:.2f}). Thread may not contain enough information for a good issue."
+            warning = result["warning_message"]
+            return warning
 
-            # Create permalink to thread
-            permalink = await self.thread_service.get_channel_permalink(
-                channel_id, root_id
-            )
-            logger.info(f"Created permalink: {permalink}")
+        # If we get here, issue was created successfully
+        issue_url = result
 
-            # Create GitHub issue (with checks)
-            logger.info("Creating GitHub issue with similarity and Sentry checks...")
+        return f"""✅ **GitHub issue created successfully!**
 
-            result = await self.github_integration.create_issue_from_analysis(
-                analysis,
-                permalink,
-                thread_messages,
-                self.sentry_integration,
-                force_create=False,
-            )
+**Issue:** [{analysis.suggested_title}]({issue_url})
+**Type:** {analysis.issue_type.value}
+**Priority:** {analysis.priority.value}
+**Confidence:** {analysis.confidence_score:.2f}
 
-            # Handle similar issues found
-            if (
-                isinstance(result, dict)
-                and result.get("type") == "similar_issues_found"
-            ):
-                # Store issue data for potential creation
-                thread_id = root_id
-                self.pending_issues[thread_id] = {
-                    "analysis": result["analysis"],
-                    "mattermost_link": result["mattermost_link"],
-                    "thread_messages": result["thread_messages"],
-                    "channel_id": channel_id,
-                }
+The issue has been created from your description."""
 
-                warning = result["warning_message"]
-                return warning
+    async def _create_issue_from_thread(self, post_data: dict[str, Any]) -> str:
+        """Create issue from thread analysis (existing behavior)"""
+        # Extract thread root ID (post that started the thread)
+        root_id = post_data.get("root_id") or post_data.get("id")
+        channel_id = post_data.get("channel_id")
 
-            # If we get here, issue was created successfully
-            issue_url = result
+        logger.info(
+            f"Post data: root_id={post_data.get('root_id')}, id={post_data.get('id')}, channel_id={channel_id}"
+        )
 
-            return f"""✅ **GitHub issue created successfully!**
+        if not root_id:
+            return "❌ Could not identify thread root"
+
+        # Get thread messages
+        logger.info(f"Analyzing thread {root_id} for issue creation")
+        thread_messages = await self.thread_service.get_thread_messages(root_id)
+
+        logger.info(f"Found {len(thread_messages)} messages in thread")
+        if not thread_messages:
+            return "❌ No messages found in thread"
+
+        # Log first few messages for debugging
+        for i, msg in enumerate(thread_messages[:3]):
+            logger.info(f"Message {i}: {msg.user} - {msg.content[:100]}...")
+
+        # Analyze thread with LLM
+        logger.info("Starting LLM analysis...")
+        analysis = await self.thread_analyzer.analyze_thread(thread_messages)
+
+        logger.info(
+            f"Analysis result: title='{analysis.suggested_title}', confidence={analysis.confidence_score}"
+        )
+
+        if analysis.confidence_score < 0.3:
+            return f"⚠️ Low confidence analysis ({analysis.confidence_score:.2f}). Thread may not contain enough information for a good issue."
+
+        # Create permalink to thread
+        permalink = await self.thread_service.get_channel_permalink(channel_id, root_id)
+        logger.info(f"Created permalink: {permalink}")
+
+        # Create GitHub issue (with checks)
+        logger.info("Creating GitHub issue with similarity and Sentry checks...")
+
+        result = await self.github_integration.create_issue_from_analysis(
+            analysis,
+            permalink,
+            thread_messages,
+            self.sentry_integration,
+            force_create=False,
+        )
+
+        # Handle similar issues found
+        if isinstance(result, dict) and result.get("type") == "similar_issues_found":
+            # Store issue data for potential creation
+            thread_id = root_id
+            self.pending_issues[thread_id] = {
+                "analysis": result["analysis"],
+                "mattermost_link": result["mattermost_link"],
+                "thread_messages": result["thread_messages"],
+                "channel_id": channel_id,
+            }
+
+            warning = result["warning_message"]
+            return warning
+
+        # If we get here, issue was created successfully
+        issue_url = result
+
+        return f"""✅ **GitHub issue created successfully!**
 
 **Issue:** [{analysis.suggested_title}]({issue_url})
 **Type:** {analysis.issue_type.value}
@@ -385,10 +470,6 @@ class DeputyBot:
 **Confidence:** {analysis.confidence_score:.2f}
 
 The issue has been created with automatic analysis of the thread content."""
-
-        except Exception as e:
-            logger.error(f"Error creating issue: {e}")
-            return f"❌ Failed to create issue: {str(e)}"
 
     async def _handle_sentry_command(self, command: str) -> str:
         """Handle Sentry-related commands"""
@@ -493,10 +574,17 @@ The issue has been created with automatic analysis of the thread content."""
         return """🤖 **Deputy Bot - Available Commands:**
 
 • `help` - Display this help
-• `create-issue` - Create a GitHub issue from the current thread (checks for duplicates, respond with `yes` or `no` when prompted)
+• `create-issue` - Create a GitHub issue from the current thread
+• `create-issue <description>` - Create a GitHub issue directly from description
 • `sentry top [24h|7d] [limit]` - Show top Sentry issues (periods: 24h, 7d only)
 • `sentry search <query> [24h|7d]` - Search Sentry issues (periods: 24h, 7d only)
 • `sentry stats [24h|7d]` - Show Sentry project statistics (periods: 24h, 7d only)
+
+**Examples:**
+- `@deputy create-issue` - Analyze current thread and create issue
+- `@deputy create-issue Login button not working on mobile` - Create issue directly
+
+**Note:** Both commands check for duplicates. Respond with `yes` or `no` when prompted.
 """
 
     async def _handle_yes_command(self, post_data: dict[str, Any] | None) -> str:

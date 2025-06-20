@@ -268,5 +268,5 @@ class TestBotAdvancedCommands:
 
         help_message = bot._get_help_message()
 
-        assert "respond with `yes` or `no` when prompted" in help_message
+        assert "Respond with `yes` or `no` when prompted" in help_message
         assert "`create-issue`" in help_message
