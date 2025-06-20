@@ -19,11 +19,21 @@ class IssueType(str, Enum):
     TASK = "task"
 
 
+class AttachmentInfo(BaseModel):
+    """Information about a file attachment"""
+
+    url: str
+    filename: str
+    mime_type: str | None = None
+    size: int | None = None
+    is_image: bool = False
+
+
 class ThreadMessage(BaseModel):
     user: str
     content: str
     timestamp: str
-    attachments: list[str] = []  # URLs to images/files
+    attachments: list[AttachmentInfo] = []  # Detailed attachment info
 
 
 class ThreadAnalysis(BaseModel):

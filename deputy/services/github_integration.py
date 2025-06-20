@@ -3,7 +3,12 @@ import logging
 from github import Github
 from github.Repository import Repository
 
-from deputy.models.issue import GitHubIssue, IssueCreationConfig, ThreadAnalysis
+from deputy.models.issue import (
+    GitHubIssue,
+    IssueCreationConfig,
+    ThreadAnalysis,
+    ThreadMessage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +28,19 @@ class GitHubIntegration:
         return self._repo
 
     async def create_issue_from_analysis(
-        self, analysis: ThreadAnalysis, mattermost_link: str | None = None
+        self,
+        analysis: ThreadAnalysis,
+        mattermost_link: str | None = None,
+        thread_messages: list[ThreadMessage] | None = None,
     ) -> str:
         """Create a GitHub issue from thread analysis"""
         try:
             logger.info(f"Creating issue for repo: {self.org}/{self.repo_name}")
 
             # Create GitHub issue object
-            github_issue = self._analysis_to_github_issue(analysis, mattermost_link)
+            github_issue = self._analysis_to_github_issue(
+                analysis, mattermost_link, thread_messages
+            )
 
             logger.info(f"Issue title: {github_issue.title}")
             logger.info(f"Issue labels: {github_issue.labels}")
@@ -77,7 +87,10 @@ class GitHubIntegration:
             raise
 
     def _analysis_to_github_issue(
-        self, analysis: ThreadAnalysis, mattermost_link: str | None = None
+        self,
+        analysis: ThreadAnalysis,
+        mattermost_link: str | None = None,
+        thread_messages: list[ThreadMessage] | None = None,
     ) -> GitHubIssue:
         """Convert thread analysis to GitHub issue format"""
 
@@ -111,6 +124,47 @@ class GitHubIntegration:
             body_parts.append("## Additional Context")
             body_parts.append(analysis.additional_context)
             body_parts.append("")
+
+        # Images and Attachments from thread
+        if thread_messages:
+            images = []
+            files = []
+
+            for msg in thread_messages:
+                for attachment in msg.attachments:
+                    if attachment.is_image:
+                        images.append(attachment)
+                    else:
+                        files.append(attachment)
+
+            if images:
+                body_parts.append("## Screenshots & Images")
+                body_parts.append("*The following images were attached to the discussion:*")
+                body_parts.append("")
+                for i, img in enumerate(images, 1):
+                    file_info = f"{i}. 📸 **{img.filename}**"
+                    if img.mime_type:
+                        file_info += f" ({img.mime_type})"
+                    if img.size:
+                        size_mb = img.size / (1024 * 1024)
+                        file_info += f" - {size_mb:.1f} MB"
+                    body_parts.append(file_info)
+                    body_parts.append(f"   > [View in Mattermost thread]({img.url}) *(requires authentication)*")
+                body_parts.append("")
+                body_parts.append("💡 **To view images**: Please check the Mattermost thread link below or ask the reporter to attach them directly to this GitHub issue.")
+                body_parts.append("")
+
+            if files:
+                body_parts.append("## Related Files")
+                for file in files:
+                    file_info = f"📎 [{file.filename}]({file.url})"
+                    if file.mime_type:
+                        file_info += f" ({file.mime_type})"
+                    if file.size:
+                        size_kb = file.size / 1024
+                        file_info += f" [{size_kb:.1f} KB]"
+                    body_parts.append(file_info)
+                body_parts.append("")
 
         # Mattermost link
         if mattermost_link:

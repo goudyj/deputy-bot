@@ -12,7 +12,13 @@ from deputy.models.config import (
     LLMConfig,
     MattermostConfig,
 )
-from deputy.models.issue import IssuePriority, IssueType, ThreadAnalysis, ThreadMessage
+from deputy.models.issue import (
+    AttachmentInfo,
+    IssuePriority,
+    IssueType,
+    ThreadAnalysis,
+    ThreadMessage,
+)
 
 
 @pytest.fixture
@@ -62,6 +68,40 @@ def mock_thread_messages():
             user="alice",
             content="Here's the full error: POST /api/v1/connect returned 403.",
             timestamp="2024-06-18T10:10:00Z",
+            attachments=[],
+        ),
+    ]
+
+
+@pytest.fixture
+def mock_thread_messages_with_images():
+    """Sample thread messages with images for testing"""
+    return [
+        ThreadMessage(
+            user="alice",
+            content="I'm getting this error screen:",
+            timestamp="2024-06-18T10:00:00Z",
+            attachments=[
+                AttachmentInfo(
+                    url="http://mattermost.example.com/api/v4/files/error_screenshot",
+                    filename="error_screenshot.png",
+                    mime_type="image/png",
+                    size=1024*512,  # 512KB
+                    is_image=True
+                ),
+                AttachmentInfo(
+                    url="http://mattermost.example.com/api/v4/files/debug_log",
+                    filename="debug.log",
+                    mime_type="text/plain",
+                    size=1024*50,  # 50KB
+                    is_image=False
+                )
+            ],
+        ),
+        ThreadMessage(
+            user="bob",
+            content="Thanks for the screenshot! I can see the issue now.",
+            timestamp="2024-06-18T10:05:00Z",
             attachments=[],
         ),
     ]

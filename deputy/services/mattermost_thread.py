@@ -2,7 +2,7 @@ import logging
 
 import aiohttp
 
-from deputy.models.issue import ThreadMessage
+from deputy.models.issue import AttachmentInfo, ThreadMessage
 
 logger = logging.getLogger(__name__)
 
@@ -89,8 +89,8 @@ class MattermostThreadService:
             logger.error(f"Error getting user {user_id}: {e}")
             return None
 
-    async def _get_post_attachments(self, post_id: str) -> list[str]:
-        """Get file attachments for a post"""
+    async def _get_post_attachments(self, post_id: str) -> list[AttachmentInfo]:
+        """Get file attachments for a post with detailed metadata"""
         try:
             # Get post file attachments
             async with self.session.get(
@@ -99,16 +99,36 @@ class MattermostThreadService:
             ) as resp:
                 if resp.status == 200:
                     files = await resp.json()
-                    attachment_urls = []
+                    attachments = []
 
                     for file_info in files:
                         file_id = file_info.get("id")
                         if file_id:
                             # Create public file URL
                             file_url = f"{self.base_url}/api/v4/files/{file_id}"
-                            attachment_urls.append(file_url)
 
-                    return attachment_urls
+                            # Extract file metadata
+                            filename = file_info.get("name", "unknown")
+                            mime_type = file_info.get("mime_type")
+                            size = file_info.get("size")
+
+                            # Determine if it's an image
+                            is_image = (
+                                mime_type and mime_type.startswith("image/")
+                                if mime_type
+                                else False
+                            )
+
+                            attachment = AttachmentInfo(
+                                url=file_url,
+                                filename=filename,
+                                mime_type=mime_type,
+                                size=size,
+                                is_image=is_image,
+                            )
+                            attachments.append(attachment)
+
+                    return attachments
                 return []
         except Exception as e:
             logger.error(f"Error getting attachments for post {post_id}: {e}")

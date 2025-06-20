@@ -333,7 +333,7 @@ class DeputyBot:
             # Create GitHub issue
             logger.info("Creating GitHub issue...")
             issue_url = await self.github_integration.create_issue_from_analysis(
-                analysis, permalink
+                analysis, permalink, thread_messages
             )
 
             return f"""✅ **GitHub issue created successfully!**

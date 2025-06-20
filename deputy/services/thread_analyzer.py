@@ -98,7 +98,15 @@ Analyze the conversation and extract:
 8. Suggested labels
 9. Confidence score (0-1) in your analysis
 
-Focus on technical details, error messages, and user problems. Consider images/attachments mentioned.
+Focus on technical details, error messages, and user problems.
+
+**IMPORTANT**: Pay special attention to images and attachments mentioned in the thread:
+- Images (📸) often contain screenshots, error messages, UI issues, or debugging information
+- Files (📎) may contain logs, code samples, or configuration files
+- Include reference to these visual elements in your analysis
+- If images show error screens, UI problems, or code issues, increase priority accordingly
+- Mention specific images/files in the detailed description when relevant
+- When images are present, add a note in your description like "See attached screenshots for visual context"
 
 Respond in JSON format with this structure:
 {
@@ -214,7 +222,7 @@ Respond in JSON format with this structure:
         return state
 
     def _format_thread_for_analysis(self, messages: list[ThreadMessage]) -> str:
-        """Format thread messages for LLM analysis"""
+        """Format thread messages for LLM analysis including attachments"""
         formatted = []
 
         for i, msg in enumerate(messages):
@@ -224,8 +232,40 @@ Respond in JSON format with this structure:
             formatted.append(msg.content)
 
             if msg.attachments:
-                formatted.append(f"Attachments: {', '.join(msg.attachments)}")
+                # Separate images from other attachments
+                images = [att for att in msg.attachments if att.is_image]
+                other_files = [att for att in msg.attachments if not att.is_image]
+
+                if images:
+                    image_descriptions = []
+                    for img in images:
+                        desc = f"📸 {img.filename}"
+                        if img.mime_type:
+                            desc += f" ({img.mime_type})"
+                        if img.size:
+                            desc += f" [{self._format_file_size(img.size)}]"
+                        image_descriptions.append(desc)
+                    formatted.append(f"**Images:** {', '.join(image_descriptions)}")
+
+                if other_files:
+                    file_descriptions = []
+                    for file in other_files:
+                        desc = f"📎 {file.filename}"
+                        if file.mime_type:
+                            desc += f" ({file.mime_type})"
+                        if file.size:
+                            desc += f" [{self._format_file_size(file.size)}]"
+                        file_descriptions.append(desc)
+                    formatted.append(f"**Files:** {', '.join(file_descriptions)}")
 
             formatted.append("")  # Empty line between messages
 
         return "\n".join(formatted)
+
+    def _format_file_size(self, size_bytes: int) -> str:
+        """Format file size in human readable format"""
+        for unit in ["B", "KB", "MB", "GB"]:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.1f} TB"

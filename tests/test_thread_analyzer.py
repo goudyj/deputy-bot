@@ -62,6 +62,22 @@ class TestThreadAnalyzer:
                 len(formatted.split("\n\n")) >= 3
             )  # Should have empty lines between messages
 
+    def test_format_thread_with_images(self, mock_config, mock_thread_messages_with_images):
+        """Test thread formatting with images and attachments"""
+
+        with patch("deputy.services.thread_analyzer.ChatOpenAI"):
+            analyzer = ThreadAnalyzer(mock_config.llm)
+            formatted = analyzer._format_thread_for_analysis(mock_thread_messages_with_images)
+
+            assert "**alice**" in formatted
+            assert "I'm getting this error screen:" in formatted
+            assert "**Images:** 📸 error_screenshot.png" in formatted
+            assert "(image/png)" in formatted
+            assert "[512.0 KB]" in formatted
+            assert "**Files:** 📎 debug.log" in formatted
+            assert "(text/plain)" in formatted
+            assert "[50.0 KB]" in formatted
+
     @pytest.mark.asyncio
     async def test_analyze_thread_error_fallback(
         self, mock_config, mock_thread_messages
