@@ -51,8 +51,17 @@ class MattermostConfig(BaseModel):
 
     def should_listen_to_channel(self, channel_name: str) -> bool:
         for pattern in self.channels:
-            if re.match(pattern, channel_name):
+            # Handle wildcard pattern '*' to match all channels
+            if pattern == "*":
                 return True
+
+            try:
+                if re.match(pattern, channel_name):
+                    return True
+            except re.error:
+                # If regex pattern is invalid, treat as literal string match
+                if pattern == channel_name:
+                    return True
         return False
 
 
