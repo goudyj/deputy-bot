@@ -254,47 +254,6 @@ class TestBotAdvancedCommands:
         assert pending["analysis"] == self.mock_analysis
         assert pending["channel_id"] == "channel_123"
 
-    @pytest.mark.asyncio
-    async def test_force_create_issue_skips_pending_storage(
-        self, mock_config, mock_thread_messages
-    ):
-        """Test that force-create-issue skips pending storage"""
-        bot = DeputyBot(mock_config)
-
-        # Mock services
-        bot.thread_analyzer = AsyncMock()
-        bot.thread_analyzer.analyze_thread.return_value = self.mock_analysis
-
-        bot.github_integration = AsyncMock()
-        bot.github_integration.create_issue_from_analysis.return_value = (
-            "https://github.com/org/repo/issues/123"
-        )
-
-        bot.thread_service = AsyncMock()
-        bot.thread_service.get_thread_messages.return_value = mock_thread_messages
-        bot.thread_service.get_channel_permalink.return_value = "http://mattermost.link"
-
-        bot.sentry_integration = AsyncMock()
-
-        post_data = {
-            "id": "post_123",
-            "root_id": "thread_123",
-            "channel_id": "channel_123",
-        }
-
-        result = await bot._handle_create_issue_command(
-            "force-create-issue", "dev-team", post_data, force=True
-        )
-
-        # Should create issue directly without storing pending data
-        assert "✅ **GitHub issue created successfully!**" in result
-        assert len(bot.pending_issues) == 0
-
-        # Should call with force_create=True
-        bot.github_integration.create_issue_from_analysis.assert_called_once()
-        call_args = bot.github_integration.create_issue_from_analysis.call_args
-        assert call_args.kwargs["force_create"] is True
-
     def test_pending_issues_initialization(self, mock_config):
         """Test that pending_issues dict is properly initialized"""
         bot = DeputyBot(mock_config)

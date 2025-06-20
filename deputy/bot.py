@@ -240,17 +240,9 @@ class DeputyBot:
 
         if command == "help":
             return self._get_help_message()
-        elif command == "status":
-            return "🤖 Deputy Bot is operational!"
-        elif command.startswith("bug"):
-            return "🐛 Bug management feature under development..."
         elif command.startswith("create-issue"):
             return await self._handle_create_issue_command(
                 command, channel_name, post_data
-            )
-        elif command.startswith("force-create-issue"):
-            return await self._handle_create_issue_command(
-                command, channel_name, post_data, force=True
             )
         elif command.startswith("sentry"):
             return await self._handle_sentry_command(command)
@@ -258,8 +250,6 @@ class DeputyBot:
             return await self._handle_yes_command(post_data)
         elif command == "no":
             return await self._handle_no_command(post_data)
-        elif command.startswith("issue"):
-            return "📝 Issue creation feature under development..."
         else:
             return f"❓ Unknown command: `{command}`. Type `@{self.config.mattermost.bot_name} help` to see available commands."
 
@@ -302,7 +292,6 @@ class DeputyBot:
         command: str,
         channel_name: str,
         post_data: dict[str, Any] | None,
-        force: bool = False,
     ) -> str:
         """Handle create-issue command"""
 
@@ -357,28 +346,20 @@ class DeputyBot:
             )
             logger.info(f"Created permalink: {permalink}")
 
-            # Create GitHub issue (with checks unless forced)
-            if force:
-                logger.info(
-                    "Force creating GitHub issue (skipping similarity checks)..."
-                )
-            else:
-                logger.info(
-                    "Creating GitHub issue with similarity and Sentry checks..."
-                )
+            # Create GitHub issue (with checks)
+            logger.info("Creating GitHub issue with similarity and Sentry checks...")
 
             result = await self.github_integration.create_issue_from_analysis(
                 analysis,
                 permalink,
                 thread_messages,
                 self.sentry_integration,
-                force_create=force,
+                force_create=False,
             )
 
-            # Handle similar issues found (only if not forced)
+            # Handle similar issues found
             if (
-                not force
-                and isinstance(result, dict)
+                isinstance(result, dict)
                 and result.get("type") == "similar_issues_found"
             ):
                 # Store issue data for potential creation
@@ -512,17 +493,11 @@ The issue has been created with automatic analysis of the thread content."""
         return """🤖 **Deputy Bot - Available Commands:**
 
 • `help` - Display this help
-• `status` - Check bot status
 • `create-issue` - Create a GitHub issue from the current thread (checks for duplicates, respond with `yes` or `no` when prompted)
-• `force-create-issue` - Force create issue even if similar ones exist
 • `sentry top [24h|7d] [limit]` - Show top Sentry issues (periods: 24h, 7d only)
 • `sentry search <query> [24h|7d]` - Search Sentry issues (periods: 24h, 7d only)
 • `sentry stats [24h|7d]` - Show Sentry project statistics (periods: 24h, 7d only)
-• `bug <description>` - Analyze and prioritize a bug (coming soon)
-• `issue <description>` - Create a GitHub issue (coming soon)
-
-**Listening on channels:** {channels}
-""".format(channels=", ".join(self.config.mattermost.channels))
+"""
 
     async def _handle_yes_command(self, post_data: dict[str, Any] | None) -> str:
         """Handle yes command to confirm issue creation"""

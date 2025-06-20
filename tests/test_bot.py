@@ -92,17 +92,7 @@ class TestDeputyBot:
         assert "Deputy Bot" in result
         assert "help" in result
         assert "create-issue" in result
-        assert "status" in result
-        assert "town-square" in result  # Should show channels from config
-
-    @pytest.mark.asyncio
-    async def test_process_command_status(self, mock_config):
-        """Test status command processing"""
-        bot = DeputyBot(mock_config)
-
-        result = await bot._process_command("status", "dev-team")
-
-        assert "Deputy Bot is operational" in result
+        assert "sentry" in result
 
     @pytest.mark.asyncio
     async def test_handle_create_issue_command_missing_services(self, mock_config):
