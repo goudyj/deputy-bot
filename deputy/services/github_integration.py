@@ -1,4 +1,6 @@
 import logging
+import re
+from typing import Any
 
 from github import Github
 from github.Repository import Repository
@@ -9,6 +11,7 @@ from deputy.models.issue import (
     ThreadAnalysis,
     ThreadMessage,
 )
+from deputy.models.sentry import SentrySearchFilter
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +35,44 @@ class GitHubIntegration:
         analysis: ThreadAnalysis,
         mattermost_link: str | None = None,
         thread_messages: list[ThreadMessage] | None = None,
-    ) -> str:
+        sentry_integration=None,
+        force_create: bool = False,
+    ) -> str | dict[str, Any]:
         """Create a GitHub issue from thread analysis"""
         try:
             logger.info(f"Creating issue for repo: {self.org}/{self.repo_name}")
 
-            # Create GitHub issue object
+            # Step 1: Search for similar issues (unless forced)
+            similar_issues = []
+            if not force_create:
+                logger.info("Searching for similar GitHub issues...")
+                similar_issues = await self.search_similar_issues(analysis)
+
+                if similar_issues:
+                    logger.info(f"Found {len(similar_issues)} similar issues")
+                    # Return warning instead of creating issue
+                    return {
+                        "type": "similar_issues_found",
+                        "similar_issues": similar_issues,
+                        "warning_message": self.format_similar_issues_warning(
+                            similar_issues
+                        ),
+                        "analysis": analysis,
+                        "mattermost_link": mattermost_link,
+                        "thread_messages": thread_messages,
+                    }
+
+            # Step 2: Search for related Sentry errors
+            logger.info("Searching for related Sentry errors...")
+            sentry_errors = await self.search_related_sentry_errors(
+                analysis, sentry_integration
+            )
+            if sentry_errors:
+                logger.info(f"Found {len(sentry_errors)} related Sentry errors")
+
+            # Create GitHub issue object with Sentry errors
             github_issue = self._analysis_to_github_issue(
-                analysis, mattermost_link, thread_messages
+                analysis, mattermost_link, thread_messages, sentry_errors
             )
 
             logger.info(f"Issue title: {github_issue.title}")
@@ -91,6 +124,7 @@ class GitHubIntegration:
         analysis: ThreadAnalysis,
         mattermost_link: str | None = None,
         thread_messages: list[ThreadMessage] | None = None,
+        sentry_errors: list[dict[str, Any]] | None = None,
     ) -> GitHubIssue:
         """Convert thread analysis to GitHub issue format"""
 
@@ -180,6 +214,12 @@ class GitHubIntegration:
             )
             body_parts.append("")
 
+        # Sentry errors section
+        if sentry_errors:
+            sentry_section = self.format_sentry_errors_section(sentry_errors)
+            if sentry_section:
+                body_parts.append(sentry_section)
+
         # Metadata
         body_parts.append("---")
         body_parts.append(f"**Issue Type:** {analysis.issue_type.value}")
@@ -235,3 +275,176 @@ class GitHubIntegration:
         except Exception as e:
             logger.error(f"Failed to validate labels: {e}")
             return []  # Return empty list if validation fails
+
+    def _extract_keywords(self, analysis: ThreadAnalysis) -> list[str]:
+        """Extract relevant keywords from thread analysis for searching"""
+        keywords = []
+
+        # Add words from title (remove common words)
+        title_words = re.findall(r"\b\w{3,}\b", analysis.suggested_title.lower())
+        keywords.extend(
+            [w for w in title_words if w not in {"error", "issue", "problem", "bug"}]
+        )
+
+        # Add technical terms from description
+        if analysis.detailed_description:
+            # Look for technical terms (CamelCase, snake_case, or quoted strings)
+            tech_terms = re.findall(
+                r'\b[A-Z][a-z]+[A-Z]\w*\b|\b\w+_\w+\b|"[^"]+"|\'[^\']+\'',
+                analysis.detailed_description,
+            )
+            keywords.extend([term.strip("\"'") for term in tech_terms])
+
+        # Add error types from suggested labels
+        error_keywords = [
+            label
+            for label in analysis.suggested_labels
+            if label in ["timeout", "connection", "database", "authentication", "api"]
+        ]
+        keywords.extend(error_keywords)
+
+        # Remove duplicates and return top 5 most relevant
+        return list(dict.fromkeys(keywords))[:5]
+
+    async def search_similar_issues(
+        self, analysis: ThreadAnalysis
+    ) -> list[dict[str, Any]]:
+        """Search for similar issues in the GitHub repository"""
+        try:
+            keywords = self._extract_keywords(analysis)
+            if not keywords:
+                return []
+
+            # Build search query
+            search_terms = " OR ".join(f'"{keyword}"' for keyword in keywords)
+            query = f"repo:{self.org}/{self.repo_name} is:issue {search_terms}"
+
+            logger.info(f"Searching for similar issues with query: {query}")
+
+            # Search using GitHub API
+            search_result = self.github.search_issues(
+                query=query, sort="updated", order="desc"
+            )
+
+            similar_issues = []
+            for issue in search_result[:3]:  # Limit to top 3 results
+                similar_issues.append(
+                    {
+                        "number": issue.number,
+                        "title": issue.title,
+                        "url": issue.html_url,
+                        "state": issue.state,
+                        "updated_at": issue.updated_at.isoformat(),
+                        "labels": [label.name for label in issue.labels],
+                    }
+                )
+
+            logger.info(f"Found {len(similar_issues)} similar issues")
+            return similar_issues
+
+        except Exception as e:
+            logger.error(f"Failed to search similar issues: {e}")
+            return []
+
+    def format_similar_issues_warning(
+        self, similar_issues: list[dict[str, Any]]
+    ) -> str:
+        """Format similar issues warning message"""
+        if not similar_issues:
+            return ""
+
+        warning = "⚠️ **Similar Issues Found:**\n\n"
+
+        for issue in similar_issues:
+            state_emoji = "🟢" if issue["state"] == "open" else "🔴"
+            warning += f"{state_emoji} **#{issue['number']}**: {issue['title']}\n"
+            warning += f"   🔗 {issue['url']}\n"
+            if issue["labels"]:
+                warning += f"   🏷️ Labels: {', '.join(issue['labels'])}\n"
+            warning += "\n"
+
+        warning += "**Do you want to continue creating a new issue?**\n"
+        warning += "Reply with `@deputy yes` to continue or `@deputy no` to cancel."
+
+        return warning
+
+    async def search_related_sentry_errors(
+        self, analysis: ThreadAnalysis, sentry_integration=None
+    ) -> list[dict[str, Any]]:
+        """Search for related Sentry errors"""
+        if not sentry_integration or not sentry_integration.config.is_configured():
+            return []
+
+        try:
+            # Extract search terms from analysis
+            keywords = self._extract_keywords(analysis)
+            if not keywords:
+                return []
+
+            # Search for each keyword in Sentry
+            related_errors = []
+            for keyword in keywords[:3]:  # Limit to top 3 keywords
+                try:
+                    filters = SentrySearchFilter(
+                        query=keyword,
+                        period="7d",  # Look at last 7 days
+                        limit=2,  # Max 2 results per keyword
+                        status="unresolved",
+                    )
+
+                    issues = await sentry_integration.search_issues(filters)
+                    for issue in issues:
+                        related_errors.append(
+                            {
+                                "keyword": keyword,
+                                "id": issue.id,
+                                "short_id": issue.short_id,
+                                "title": issue.title,
+                                "permalink": issue.permalink,
+                                "level": issue.level,
+                                "count": issue.count,
+                                "last_seen": issue.last_seen.isoformat(),
+                            }
+                        )
+
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to search Sentry for keyword '{keyword}': {e}"
+                    )
+                    continue
+
+            # Remove duplicates by issue ID and limit results
+            seen_ids = set()
+            unique_errors = []
+            for error in related_errors:
+                if error["id"] not in seen_ids:
+                    seen_ids.add(error["id"])
+                    unique_errors.append(error)
+                    if len(unique_errors) >= 3:  # Limit to 3 total results
+                        break
+
+            logger.info(f"Found {len(unique_errors)} related Sentry errors")
+            return unique_errors
+
+        except Exception as e:
+            logger.error(f"Failed to search related Sentry errors: {e}")
+            return []
+
+    def format_sentry_errors_section(self, sentry_errors: list[dict[str, Any]]) -> str:
+        """Format Sentry errors section for GitHub issue"""
+        if not sentry_errors:
+            return ""
+
+        section = "## 🔴 Related Sentry Errors\n\n"
+        section += "The following Sentry errors might be related to this issue:\n\n"
+
+        for error in sentry_errors:
+            level_emoji = {"error": "🔴", "warning": "🟡", "info": "🔵"}.get(
+                error["level"], "❓"
+            )
+            section += f"{level_emoji} **{error['short_id']}**: {error['title']}\n"
+            section += f"   💥 {error['count']} events • ⏰ Last seen: {error['last_seen'][:10]}\n"
+            section += f"   🔗 [View in Sentry]({error['permalink']})\n"
+            section += f"   🔍 Found via keyword: `{error['keyword']}`\n\n"
+
+        return section

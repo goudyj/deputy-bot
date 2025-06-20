@@ -32,6 +32,9 @@ class DeputyBot:
         self.thread_service = None
         self.sentry_integration = None
 
+        # Store pending issues (thread_id -> issue_data)
+        self.pending_issues: dict[str, dict] = {}
+
     async def start(self):
         try:
             self.session = aiohttp.ClientSession()
@@ -245,8 +248,16 @@ class DeputyBot:
             return await self._handle_create_issue_command(
                 command, channel_name, post_data
             )
+        elif command.startswith("force-create-issue"):
+            return await self._handle_create_issue_command(
+                command, channel_name, post_data, force=True
+            )
         elif command.startswith("sentry"):
             return await self._handle_sentry_command(command)
+        elif command == "yes":
+            return await self._handle_yes_command(post_data)
+        elif command == "no":
+            return await self._handle_no_command(post_data)
         elif command.startswith("issue"):
             return "📝 Issue creation feature under development..."
         else:
@@ -287,7 +298,11 @@ class DeputyBot:
                 logger.info(f"Sent threaded reply in channel {channel_id}")
 
     async def _handle_create_issue_command(
-        self, command: str, channel_name: str, post_data: dict[str, Any] | None
+        self,
+        command: str,
+        channel_name: str,
+        post_data: dict[str, Any] | None,
+        force: bool = False,
     ) -> str:
         """Handle create-issue command"""
 
@@ -342,11 +357,44 @@ class DeputyBot:
             )
             logger.info(f"Created permalink: {permalink}")
 
-            # Create GitHub issue
-            logger.info("Creating GitHub issue...")
-            issue_url = await self.github_integration.create_issue_from_analysis(
-                analysis, permalink, thread_messages
+            # Create GitHub issue (with checks unless forced)
+            if force:
+                logger.info(
+                    "Force creating GitHub issue (skipping similarity checks)..."
+                )
+            else:
+                logger.info(
+                    "Creating GitHub issue with similarity and Sentry checks..."
+                )
+
+            result = await self.github_integration.create_issue_from_analysis(
+                analysis,
+                permalink,
+                thread_messages,
+                self.sentry_integration,
+                force_create=force,
             )
+
+            # Handle similar issues found (only if not forced)
+            if (
+                not force
+                and isinstance(result, dict)
+                and result.get("type") == "similar_issues_found"
+            ):
+                # Store issue data for potential creation
+                thread_id = root_id
+                self.pending_issues[thread_id] = {
+                    "analysis": result["analysis"],
+                    "mattermost_link": result["mattermost_link"],
+                    "thread_messages": result["thread_messages"],
+                    "channel_id": channel_id,
+                }
+
+                warning = result["warning_message"]
+                return warning
+
+            # If we get here, issue was created successfully
+            issue_url = result
 
             return f"""✅ **GitHub issue created successfully!**
 
@@ -465,7 +513,10 @@ The issue has been created with automatic analysis of the thread content."""
 
 • `help` - Display this help
 • `status` - Check bot status
-• `create-issue` - Create a GitHub issue from the current thread
+• `create-issue` - Create a GitHub issue from the current thread (checks for duplicates)
+• `force-create-issue` - Force create issue even if similar ones exist
+• `yes` - Confirm issue creation when similar issues are found
+• `no` - Cancel issue creation when similar issues are found
 • `sentry top [24h|7d] [limit]` - Show top Sentry issues (periods: 24h, 7d only)
 • `sentry search <query> [24h|7d]` - Search Sentry issues (periods: 24h, 7d only)
 • `sentry stats [24h|7d]` - Show Sentry project statistics (periods: 24h, 7d only)
@@ -474,3 +525,74 @@ The issue has been created with automatic analysis of the thread content."""
 
 **Listening on channels:** {channels}
 """.format(channels=", ".join(self.config.mattermost.channels))
+
+    async def _handle_yes_command(self, post_data: dict[str, Any] | None) -> str:
+        """Handle yes command to confirm issue creation"""
+        if not post_data:
+            return "❌ No post data available"
+
+        # Get thread ID
+        thread_id = post_data.get("root_id") or post_data.get("id")
+        if not thread_id:
+            return "❌ Could not identify thread"
+
+        # Check if we have pending issue data
+        if thread_id not in self.pending_issues:
+            return (
+                "❌ No pending issue found for this thread. Use `create-issue` first."
+            )
+
+        try:
+            # Retrieve pending issue data
+            issue_data = self.pending_issues[thread_id]
+            analysis = issue_data["analysis"]
+            mattermost_link = issue_data["mattermost_link"]
+            thread_messages = issue_data["thread_messages"]
+
+            # Create the issue (forced)
+            logger.info("Creating GitHub issue after user confirmation...")
+            issue_url = await self.github_integration.create_issue_from_analysis(
+                analysis,
+                mattermost_link,
+                thread_messages,
+                self.sentry_integration,
+                force_create=True,
+            )
+
+            # Clean up pending data
+            del self.pending_issues[thread_id]
+
+            return f"""✅ **GitHub issue created successfully!**
+
+**Issue:** [{analysis.suggested_title}]({issue_url})
+**Type:** {analysis.issue_type.value}
+**Priority:** {analysis.priority.value}
+**Confidence:** {analysis.confidence_score:.2f}
+
+The issue has been created with automatic analysis of the thread content."""
+
+        except Exception as e:
+            # Clean up pending data on error
+            if thread_id in self.pending_issues:
+                del self.pending_issues[thread_id]
+            logger.error(f"Error creating confirmed issue: {e}")
+            return f"❌ Failed to create issue: {str(e)}"
+
+    async def _handle_no_command(self, post_data: dict[str, Any] | None) -> str:
+        """Handle no command to cancel issue creation"""
+        if not post_data:
+            return "❌ No post data available"
+
+        # Get thread ID
+        thread_id = post_data.get("root_id") or post_data.get("id")
+        if not thread_id:
+            return "❌ Could not identify thread"
+
+        # Check if we have pending issue data
+        if thread_id not in self.pending_issues:
+            return "❌ No pending issue found for this thread."
+
+        # Clean up pending data
+        del self.pending_issues[thread_id]
+
+        return "✅ Issue creation cancelled. No GitHub issue will be created."
