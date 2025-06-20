@@ -304,15 +304,10 @@ class TestBotAdvancedCommands:
         assert len(bot.pending_issues) == 0
 
     def test_help_message_includes_yes_no_commands(self, mock_config):
-        """Test that help message includes yes/no commands"""
+        """Test that help message mentions yes/no commands in create-issue description"""
         bot = DeputyBot(mock_config)
 
         help_message = bot._get_help_message()
 
-        assert (
-            "`yes` - Confirm issue creation when similar issues are found"
-            in help_message
-        )
-        assert (
-            "`no` - Cancel issue creation when similar issues are found" in help_message
-        )
+        assert "respond with `yes` or `no` when prompted" in help_message
+        assert "`create-issue`" in help_message

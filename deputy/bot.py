@@ -513,10 +513,8 @@ The issue has been created with automatic analysis of the thread content."""
 
 • `help` - Display this help
 • `status` - Check bot status
-• `create-issue` - Create a GitHub issue from the current thread (checks for duplicates)
+• `create-issue` - Create a GitHub issue from the current thread (checks for duplicates, respond with `yes` or `no` when prompted)
 • `force-create-issue` - Force create issue even if similar ones exist
-• `yes` - Confirm issue creation when similar issues are found
-• `no` - Cancel issue creation when similar issues are found
 • `sentry top [24h|7d] [limit]` - Show top Sentry issues (periods: 24h, 7d only)
 • `sentry search <query> [24h|7d]` - Search Sentry issues (periods: 24h, 7d only)
 • `sentry stats [24h|7d]` - Show Sentry project statistics (periods: 24h, 7d only)
