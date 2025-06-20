@@ -83,6 +83,44 @@ class TestDeputyBot:
         )
         assert mock_config.mattermost.should_listen_to_channel("off-topic") is False
 
+    def test_wildcard_channel_configuration(self):
+        """Test that MATTERMOST_CHANNELS=* works correctly"""
+        from deputy.models.config import MattermostConfig
+
+        config_wildcard = MattermostConfig(
+            url="http://localhost:8065",
+            token="test_token",
+            team_name="test_team",
+            channels=["*"],
+            bot_name="deputy",
+        )
+
+        # Should match any channel name
+        assert config_wildcard.should_listen_to_channel("town-square") is True
+        assert config_wildcard.should_listen_to_channel("dev-team") is True
+        assert config_wildcard.should_listen_to_channel("random-channel") is True
+        assert config_wildcard.should_listen_to_channel("off-topic") is True
+
+    def test_invalid_regex_fallback(self):
+        """Test that invalid regex patterns fall back to literal matching"""
+        from deputy.models.config import MattermostConfig
+
+        config_invalid = MattermostConfig(
+            url="http://localhost:8065",
+            token="test_token",
+            team_name="test_team",
+            channels=["[invalid-regex", "exact-match"],
+            bot_name="deputy",
+        )
+
+        # Invalid regex should match literally
+        assert config_invalid.should_listen_to_channel("[invalid-regex") is True
+        assert config_invalid.should_listen_to_channel("invalid-regex") is False
+
+        # Valid literal match
+        assert config_invalid.should_listen_to_channel("exact-match") is True
+        assert config_invalid.should_listen_to_channel("not-exact-match") is False
+
     def test_help_message(self, mock_config):
         """Test help message content"""
         bot = DeputyBot(mock_config)
