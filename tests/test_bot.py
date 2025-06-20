@@ -130,7 +130,9 @@ class TestDeputyBot:
         assert "Deputy Bot" in result
         assert "help" in result
         assert "create-issue" in result
+        assert "create-issue <description>" in result
         assert "sentry" in result
+        assert "Examples:" in result
 
     @pytest.mark.asyncio
     async def test_handle_create_issue_command_missing_services(self, mock_config):
@@ -198,6 +200,79 @@ class TestDeputyBot:
         mock_thread_service.get_thread_messages.assert_called_once_with("post123")
         mock_analyzer.analyze_thread.assert_called_once()
         mock_github.create_issue_from_analysis.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_create_issue_command_with_description(
+        self, mock_config, mock_thread_analysis
+    ):
+        """Test create-issue command with inline description"""
+        bot = DeputyBot(mock_config)
+
+        # Mock services
+        mock_analyzer = AsyncMock()
+        mock_analyzer.analyze_thread.return_value = mock_thread_analysis
+
+        mock_github = AsyncMock()
+        mock_github.create_issue_from_analysis.return_value = (
+            "https://github.com/test/test/issues/2"
+        )
+
+        bot.thread_analyzer = mock_analyzer
+        bot.github_integration = mock_github
+
+        post_data = {"id": "post123", "channel_id": "channel456"}
+
+        result = await bot._handle_create_issue_command(
+            "create-issue Login button not working on mobile", "dev-team", post_data
+        )
+
+        assert "✅" in result
+        assert "issue created successfully" in result
+        assert "https://github.com/test/test/issues/2" in result
+        assert "from your description" in result
+
+        # Verify analyzer was called with synthetic message
+        mock_analyzer.analyze_thread.assert_called_once()
+        call_args = mock_analyzer.analyze_thread.call_args[0][0]
+        assert len(call_args) == 1
+        assert call_args[0].content == "Login button not working on mobile"
+
+    @pytest.mark.asyncio
+    async def test_create_issue_from_description_low_confidence(self, mock_config):
+        """Test create-issue with description that has low confidence"""
+        from deputy.models.issue import IssuePriority, IssueType, ThreadAnalysis
+
+        bot = DeputyBot(mock_config)
+
+        # Mock low confidence analysis
+        low_confidence_analysis = ThreadAnalysis(
+            summary="Unclear issue",
+            issue_type=IssueType.BUG,
+            priority=IssuePriority.LOW,
+            suggested_title="Issue",
+            detailed_description="Not enough info",
+            confidence_score=0.1,  # Very low confidence
+        )
+
+        mock_analyzer = AsyncMock()
+        mock_analyzer.analyze_thread.return_value = low_confidence_analysis
+
+        mock_github = AsyncMock()
+
+        bot.thread_analyzer = mock_analyzer
+        bot.github_integration = mock_github
+
+        post_data = {"id": "post123", "channel_id": "channel456"}
+
+        result = await bot._create_issue_from_description("vague", post_data)
+
+        assert "⚠️" in result
+        assert "Low confidence analysis" in result
+        assert "0.10" in result
+        assert "Try providing more details" in result
+
+        # Should not create GitHub issue
+        mock_github.create_issue_from_analysis.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_process_unknown_command(self, mock_config):

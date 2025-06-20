@@ -33,6 +33,7 @@ docker-compose down        # Stop server
 **Important**: 
 - Always run `uv run ruff check` and `uv run ruff format` before committing and after completing any coding task to ensure code quality
 - Write unit tests with pytest for any new functionality added to the codebase, following existing test patterns in the `tests/` directory
+- Write concise commit messages following the pattern: `type: brief description` (e.g., `feat: add inline issue creation`, `fix: handle wildcard channels`)
 
 ## Architecture
 
