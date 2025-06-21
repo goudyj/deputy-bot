@@ -17,12 +17,28 @@ logger = logging.getLogger(__name__)
 
 
 class GitHubIntegration:
-    def __init__(self, token: str, org: str, repo: str, config: IssueCreationConfig):
+    def __init__(
+        self,
+        token: str,
+        org: str,
+        repo: str,
+        config: IssueCreationConfig,
+        llm_config=None,
+    ):
         self.github = Github(token)
         self.org = org
         self.repo_name = repo
         self.config = config
         self._repo: Repository | None = None
+
+        # Initialize smart similarity searcher if LLM config is provided
+        self.smart_searcher = None
+        if llm_config:
+            from deputy.services.smart_similarity_searcher import (
+                SmartSimilaritySearcher,
+            )
+
+            self.smart_searcher = SmartSimilaritySearcher(llm_config, self)
 
     @property
     def repo(self) -> Repository:
@@ -46,7 +62,16 @@ class GitHubIntegration:
             similar_issues = []
             if not force_create:
                 logger.info("Searching for similar GitHub issues...")
-                similar_issues = await self.search_similar_issues(analysis)
+
+                # Use smart searcher if available, otherwise fallback to basic search
+                if self.smart_searcher:
+                    logger.info("Using smart similarity search with LLM")
+                    similar_issues = await self.smart_searcher.search_similar_issues(
+                        analysis
+                    )
+                else:
+                    logger.info("Using basic similarity search")
+                    similar_issues = await self.search_similar_issues_basic(analysis)
 
                 if similar_issues:
                     logger.info(f"Found {len(similar_issues)} similar issues")
@@ -54,7 +79,7 @@ class GitHubIntegration:
                     return {
                         "type": "similar_issues_found",
                         "similar_issues": similar_issues,
-                        "warning_message": self.format_similar_issues_warning(
+                        "warning_message": self.format_smart_similar_issues_warning(
                             similar_issues
                         ),
                         "analysis": analysis,
@@ -306,7 +331,7 @@ class GitHubIntegration:
         # Remove duplicates and return top 5 most relevant
         return list(dict.fromkeys(keywords))[:5]
 
-    async def search_similar_issues(
+    async def search_similar_issues_basic(
         self, analysis: ThreadAnalysis
     ) -> list[dict[str, Any]]:
         """Search for similar issues in the GitHub repository"""
@@ -361,6 +386,58 @@ class GitHubIntegration:
             warning += f"   🔗 {issue['url']}\n"
             if issue["labels"]:
                 warning += f"   🏷️ Labels: {', '.join(issue['labels'])}\n"
+            warning += "\n"
+
+        warning += "**Do you want to continue creating a new issue?**\n"
+        warning += "Reply with `@deputy yes` to continue or `@deputy no` to cancel."
+
+        return warning
+
+    def format_smart_similar_issues_warning(
+        self, similar_issues: list[dict[str, Any]]
+    ) -> str:
+        """Format smart similar issues warning message with enhanced details"""
+        if not similar_issues:
+            return ""
+
+        warning = "🤖 **Smart Similarity Analysis - Similar Issues Found:**\n\n"
+
+        for issue in similar_issues:
+            state_emoji = "🟢" if issue["state"] == "open" else "🔴"
+            similarity_score = issue.get("similarity_score", 0)
+            age_days = issue.get("age_days", 0)
+
+            # Similarity indicators
+            if similarity_score >= 0.8:
+                similarity_emoji = "🎯"
+                similarity_text = "Very High"
+            elif similarity_score >= 0.6:
+                similarity_emoji = "🔍"
+                similarity_text = "High"
+            else:
+                similarity_emoji = "💭"
+                similarity_text = "Moderate"
+
+            warning += f"{state_emoji} **#{issue['number']}**: {issue['title']}\n"
+            warning += f"   🔗 {issue['url']}\n"
+            warning += f"   {similarity_emoji} **Similarity**: {similarity_text} ({similarity_score:.2f})\n"
+
+            if age_days > 0:
+                if age_days == 1:
+                    warning += f"   📅 Created: {age_days} day ago\n"
+                else:
+                    warning += f"   📅 Created: {age_days} days ago\n"
+
+            if issue.get("labels"):
+                warning += f"   🏷️ Labels: {', '.join(issue['labels'])}\n"
+
+            # Add AI reasoning if available
+            if issue.get("reasoning"):
+                reasoning = issue["reasoning"][:150]  # Limit reasoning length
+                if len(issue["reasoning"]) > 150:
+                    reasoning += "..."
+                warning += f"   🧠 **Analysis**: {reasoning}\n"
+
             warning += "\n"
 
         warning += "**Do you want to continue creating a new issue?**\n"

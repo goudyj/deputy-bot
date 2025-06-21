@@ -91,7 +91,7 @@ class TestGitHubAdvancedFeatures:
                 "test_token", "test_org", "test_repo", mock_config.issue_creation
             )
 
-            similar_issues = await integration.search_similar_issues(
+            similar_issues = await integration.search_similar_issues_basic(
                 mock_thread_analysis
             )
 
@@ -124,7 +124,7 @@ class TestGitHubAdvancedFeatures:
                 "test_token", "test_org", "test_repo", mock_config.issue_creation
             )
 
-            similar_issues = await integration.search_similar_issues(analysis)
+            similar_issues = await integration.search_similar_issues_basic(analysis)
 
             assert similar_issues == []  # Should return empty list
 
@@ -140,7 +140,7 @@ class TestGitHubAdvancedFeatures:
                 "test_token", "test_org", "test_repo", mock_config.issue_creation
             )
 
-            similar_issues = await integration.search_similar_issues(
+            similar_issues = await integration.search_similar_issues_basic(
                 mock_thread_analysis
             )
 
@@ -323,7 +323,7 @@ class TestGitHubAdvancedFeatures:
                 }
             ]
             with patch.object(
-                integration, "search_similar_issues", return_value=similar_issues
+                integration, "search_similar_issues_basic", return_value=similar_issues
             ):
                 with patch.object(
                     integration, "search_related_sentry_errors", return_value=[]
@@ -353,7 +353,7 @@ class TestGitHubAdvancedFeatures:
             # Mock search to return similar issues (should be ignored with force_create=True)
             similar_issues = [{"number": 123, "title": "Similar Issue"}]
             with patch.object(
-                integration, "search_similar_issues", return_value=similar_issues
+                integration, "search_similar_issues_basic", return_value=similar_issues
             ) as mock_search:
                 with patch.object(
                     integration, "search_related_sentry_errors", return_value=[]
@@ -364,7 +364,7 @@ class TestGitHubAdvancedFeatures:
                         force_create=True,
                     )
 
-                    # Should not call search_similar_issues when force_create=True
+                    # Should not call search_similar_issues_basic when force_create=True
                     mock_search.assert_not_called()
                     # Should return issue URL (string) instead of warning dict
                     assert isinstance(result, str)
