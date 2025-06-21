@@ -49,6 +49,7 @@ class TestDeputyBot:
                 mock_config.github_org,
                 mock_config.github_repo,
                 mock_config.issue_creation,
+                mock_config.llm,  # New LLM config parameter
             )
 
     def test_initialize_services_missing_github_config(self, mock_config):

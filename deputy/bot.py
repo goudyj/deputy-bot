@@ -108,13 +108,19 @@ class DeputyBot:
                 and self.config.github_org
                 and self.config.github_repo
             ):
+                # Pass LLM config for smart similarity search
+                llm_config = self.config.llm if self.config.llm.get_api_key() else None
+
                 self.github_integration = GitHubIntegration(
                     self.config.github_token,
                     self.config.github_org,
                     self.config.github_repo,
                     self.config.issue_creation,
+                    llm_config,
                 )
-                logger.info("GitHub integration initialized")
+                logger.info(
+                    "GitHub integration initialized with smart similarity search"
+                )
             else:
                 logger.warning("GitHub not configured - issue creation disabled")
 
